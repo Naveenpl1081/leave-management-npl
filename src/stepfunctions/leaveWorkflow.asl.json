@@ -1,0 +1,154 @@
+{
+    "Comment": "Leave Management Workflow - Apply, Wait for Approval, Notify",
+    "StartAt": "SendApprovalRequest",
+    "States": {
+      "SendApprovalRequest": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::lambda:invoke",
+        "Parameters": {
+          "FunctionName": "${NotifyUserFunctionArn}",
+          "Payload": {
+            "leaveRequest.$": "$.leaveRequest",
+            "recipientEmail.$": "$.approverEmail",
+            "emailType": "approval_request"
+          }
+        },
+        "ResultPath": "$.approvalEmailResult",
+        "Next": "WaitForApproval",
+        "Retry": [
+          {
+            "ErrorEquals": ["States.TaskFailed"],
+            "IntervalSeconds": 2,
+            "MaxAttempts": 3,
+            "BackoffRate": 2
+          }
+        ],
+        "Catch": [
+          {
+            "ErrorEquals": ["States.ALL"],
+            "ResultPath": "$.error",
+            "Next": "NotifyFailure"
+          }
+        ]
+      },
+      "WaitForApproval": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+        "Parameters": {
+          "FunctionName": "${ApproveLeaveCallbackArn}",
+          "Payload": {
+            "leaveRequest.$": "$.leaveRequest",
+            "taskToken.$": "$$.Task.Token"
+          }
+        },
+        "ResultPath": "$.approvalResult",
+        "TimeoutSeconds": 86400,
+        "Next": "CheckApprovalStatus",
+        "Catch": [
+          {
+            "ErrorEquals": ["States.Timeout"],
+            "ResultPath": "$.error",
+            "Next": "NotifyTimeout"
+          },
+          {
+            "ErrorEquals": ["States.ALL"],
+            "ResultPath": "$.error",
+            "Next": "NotifyFailure"
+          }
+        ]
+      },
+      "CheckApprovalStatus": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Variable": "$.approvalResult.Payload.status",
+            "StringEquals": "APPROVED",
+            "Next": "NotifyApproved"
+          },
+          {
+            "Variable": "$.approvalResult.Payload.status",
+            "StringEquals": "REJECTED",
+            "Next": "NotifyRejected"
+          }
+        ],
+        "Default": "NotifyFailure"
+      },
+      "NotifyApproved": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::lambda:invoke",
+        "Parameters": {
+          "FunctionName": "${NotifyUserFunctionArn}",
+          "Payload": {
+            "leaveRequest.$": "$.leaveRequest",
+            "recipientEmail.$": "$.leaveRequest.userEmail",
+            "emailType": "approved"
+          }
+        },
+        "ResultPath": "$.notificationResult",
+        "Next": "ApprovalSuccess",
+        "Retry": [
+          {
+            "ErrorEquals": ["States.TaskFailed"],
+            "IntervalSeconds": 2,
+            "MaxAttempts": 3,
+            "BackoffRate": 2
+          }
+        ]
+      },
+      "NotifyRejected": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::lambda:invoke",
+        "Parameters": {
+          "FunctionName": "${NotifyUserFunctionArn}",
+          "Payload": {
+            "leaveRequest.$": "$.leaveRequest",
+            "recipientEmail.$": "$.leaveRequest.userEmail",
+            "emailType": "rejected"
+          }
+        },
+        "ResultPath": "$.notificationResult",
+        "Next": "RejectionSuccess",
+        "Retry": [
+          {
+            "ErrorEquals": ["States.TaskFailed"],
+            "IntervalSeconds": 2,
+            "MaxAttempts": 3,
+            "BackoffRate": 2
+          }
+        ]
+      },
+      "NotifyTimeout": {
+        "Type": "Pass",
+        "Result": {
+          "status": "TIMEOUT",
+          "message": "Approval request timed out after 24 hours"
+        },
+        "ResultPath": "$.result",
+        "Next": "TimeoutEnd"
+      },
+      "NotifyFailure": {
+        "Type": "Pass",
+        "Result": {
+          "status": "FAILED",
+          "message": "Workflow failed due to an error"
+        },
+        "ResultPath": "$.result",
+        "Next": "FailureEnd"
+      },
+      "ApprovalSuccess": {
+        "Type": "Succeed"
+      },
+      "RejectionSuccess": {
+        "Type": "Succeed"
+      },
+      "TimeoutEnd": {
+        "Type": "Succeed"
+      },
+      "FailureEnd": {
+        "Type": "Fail",
+        "Error": "WorkflowFailed",
+        "Cause": "The leave approval workflow failed"
+      }
+    }
+  }
+  

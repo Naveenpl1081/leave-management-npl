@@ -1,0 +1,261 @@
+openapi: 3.0.0
+info:
+  title: Leave Management API
+  description: API for managing employee leave requests with approval workflow
+  version: 1.0.0
+  contact:
+    name: Leave Management Team
+    email: support@example.com
+
+servers:
+  - url: https://your-api-id.execute-api.us-east-1.amazonaws.com/dev
+    description: Development server
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token for authentication
+
+  schemas:
+    LeaveRequest:
+      type: object
+      required:
+        - startDate
+        - endDate
+        - reason
+        - approverEmail
+      properties:
+        startDate:
+          type: string
+          format: date
+          example: "2026-02-01"
+          description: Leave start date (YYYY-MM-DD)
+        endDate:
+          type: string
+          format: date
+          example: "2026-02-05"
+          description: Leave end date (YYYY-MM-DD)
+        reason:
+          type: string
+          example: "Family vacation"
+          description: Reason for leave
+        approverEmail:
+          type: string
+          format: email
+          example: "manager@company.com"
+          description: Email of the approver
+
+    ApprovalRequest:
+      type: object
+      required:
+        - leaveId
+        - action
+      properties:
+        leaveId:
+          type: string
+          example: "1736014234567-abc123xyz"
+          description: Unique leave request ID
+        action:
+          type: string
+          enum: [approve, reject]
+          example: "approve"
+          description: Action to take (approve or reject)
+        taskToken:
+          type: string
+          example: "AAAAKgAAAAIAA..."
+          description: Step Functions task token (optional)
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "Leave request created successfully"
+        data:
+          type: object
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: "Invalid request"
+        error:
+          type: string
+
+security:
+  - BearerAuth: []
+
+paths:
+  /leave/apply:
+    post:
+      summary: Apply for leave
+      description: Submit a new leave request. Requires authentication.
+      tags:
+        - Leave Requests
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LeaveRequest'
+            examples:
+              vacation:
+                summary: Vacation leave
+                value:
+                  startDate: "2026-02-01"
+                  endDate: "2026-02-05"
+                  reason: "Family vacation"
+                  approverEmail: "manager@company.com"
+              sick:
+                summary: Sick leave
+                value:
+                  startDate: "2026-01-15"
+                  endDate: "2026-01-16"
+                  reason: "Medical appointment"
+                  approverEmail: "hr@company.com"
+      responses:
+        '200':
+          description: Leave request submitted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              example:
+                success: true
+                message: "Leave request created successfully"
+                data:
+                  leaveId: "1736014234567-abc123xyz"
+                  status: "PENDING"
+                  message: "Leave request submitted successfully. Waiting for approval."
+        '400':
+          description: Bad request - Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                message: "Missing required fields: startDate, endDate, reason, approverEmail"
+        '401':
+          description: Unauthorized - Invalid or missing token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                message: "Unauthorized"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /leave/approve:
+    post:
+      summary: Approve or reject leave request
+      description: Approve or reject a pending leave request. Only users with 'approver' role can use this endpoint.
+      tags:
+        - Leave Approvals
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+            examples:
+              approve:
+                summary: Approve leave
+                value:
+                  leaveId: "1736014234567-abc123xyz"
+                  action: "approve"
+                  taskToken: "AAAAKgAAAAIAA..."
+              reject:
+                summary: Reject leave
+                value:
+                  leaveId: "1736014234567-abc123xyz"
+                  action: "reject"
+                  taskToken: "AAAAKgAAAAIAA..."
+      responses:
+        '200':
+          description: Leave request processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              example:
+                success: true
+                message: "Leave request approved successfully"
+                data:
+                  leaveId: "1736014234567-abc123xyz"
+                  status: "APPROVED"
+                  approverId: "approver456"
+                  updatedAt: "2026-01-04T12:30:45.123Z"
+        '400':
+          description: Bad request - Invalid input or leave already processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing_fields:
+                  summary: Missing fields
+                  value:
+                    success: false
+                    message: "Missing required fields: leaveId, action"
+                already_processed:
+                  summary: Already processed
+                  value:
+                    success: false
+                    message: "Leave request already approved"
+        '401':
+          description: Unauthorized - Invalid or missing token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - User is not an approver
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                message: "Forbidden - Only approvers can approve leave requests"
+        '404':
+          description: Leave request not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                message: "Leave request not found"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+tags:
+  - name: Leave Requests
+    description: Operations for submitting leave requests
+  - name: Leave Approvals
+    description: Operations for approving or rejecting leave requests
