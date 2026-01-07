@@ -14,13 +14,6 @@ Globals:
         TABLE_NAME: !Ref LeaveTable
         SENDER_EMAIL: naveenpl1081@gmail.com
 
-Parameters:
-  JWTSecret:
-    Type: String
-    Default: secret-jwt-key
-    Description: Secret key for JWT authentication
-    NoEcho: true
-
 Resources:
   # ==================== DynamoDB Table ====================
   LeaveTable:
@@ -40,27 +33,14 @@ Resources:
           KeyType: RANGE
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
       Tags:
         - Key: Project
           Value: LeaveManagement
 
-  # ==================== Step Functions (Created First) ====================
-  LeaveStateMachine:
-    Type: AWS::Serverless::StateMachine
-    Properties:
-      Name: leave-approval-workflow
-      DefinitionUri: src/stepfunctions/leaveWorkflow.asl.json
-      DefinitionSubstitutions:
-        NotifyUserFunctionArn: !GetAtt NotifyUserFunction.Arn
-        ApproveLeaveCallbackArn: !GetAtt ApproveLeaveFunction.Arn
-      Policies:
-        - LambdaInvokePolicy:
-            FunctionName: !Ref NotifyUserFunction
-        - LambdaInvokePolicy:
-            FunctionName: !Ref ApproveLeaveFunction
-      Type: STANDARD
-
-  # ==================== Lambda Functions ====================
+  # ==================== Lambda Functions (No Dependencies) ====================
   
   # Auth Lambda (Custom Authorizer)
   AuthFunction:
@@ -71,7 +51,13 @@ Resources:
       Handler: index.handler
       Environment:
         Variables:
-          JWT_SECRET: !Ref JWTSecret
+          JWT_SECRET_PARAM: "/leave-management/jwt-secret"
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+            Resource: arn:aws:ssm:ap-south-1:*:parameter/leave-management/jwt-secret      
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
@@ -80,7 +66,7 @@ Resources:
         EntryPoints:
           - index.ts
 
-  # Notify User Lambda (No dependencies)
+  # Notify User Lambda
   NotifyUserFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -102,7 +88,25 @@ Resources:
         EntryPoints:
           - index.ts
 
-  # Approve Leave Lambda (No Step Functions dependency)
+  # Wait For Approval Lambda (stores task token)
+  WaitForApprovalFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: leave-wait-approval-function
+      CodeUri: src/lambdas/waitForApproval/
+      Handler: index.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LeaveTable
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2020
+        EntryPoints:
+          - index.ts
+
+  # Approve Leave Lambda
   ApproveLeaveFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -126,7 +130,26 @@ Resources:
         EntryPoints:
           - index.ts
 
-  # Apply Leave Lambda (Gets Step Function ARN from environment)
+  # ==================== Step Functions State Machine ====================
+  LeaveStateMachine:
+    Type: AWS::Serverless::StateMachine
+    DependsOn:
+      - NotifyUserFunction
+      - WaitForApprovalFunction
+    Properties:
+      Name: leave-approval-workflow
+      DefinitionUri: src/stepfunctions/leaveWorkflow.asl.json
+      DefinitionSubstitutions:
+        NotifyUserFunctionArn: !GetAtt NotifyUserFunction.Arn
+        WaitForApprovalFunctionArn: !GetAtt WaitForApprovalFunction.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref NotifyUserFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref WaitForApprovalFunction
+      Type: STANDARD
+
+  # Apply Leave Lambda (depends on State Machine)
   ApplyLeaveFunction:
     Type: AWS::Serverless::Function
     DependsOn: LeaveStateMachine
@@ -206,7 +229,7 @@ Resources:
               authorizerUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthFunction.Arn}/invocations
               authorizerResultTtlInSeconds: 300
 
-  # Lambda Permissions for API Gateway
+  # ==================== Lambda Permissions ====================
   AuthFunctionApiPermission:
     Type: AWS::Lambda::Permission
     DependsOn: LeaveAPI

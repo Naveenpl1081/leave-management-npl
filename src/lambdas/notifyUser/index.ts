@@ -1,9 +1,9 @@
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 
-
 const sesClient = new SESClient({});
 
-const SENDER_EMAIL = process.env.SENDER_EMAIL || 'noreply@example.com';
+const SENDER_EMAIL = process.env.SENDER_EMAIL 
+const API_ENDPOINT = process.env.API_ENDPOINT 
 
 interface NotifyUserInput {
   leaveRequest: {
@@ -20,7 +20,6 @@ interface NotifyUserInput {
   emailType: 'approval_request' | 'approved' | 'rejected';
 }
 
-
 export const handler = async (event: NotifyUserInput): Promise<any> => {
   console.log('Notify User Lambda triggered');
   console.log('Event:', JSON.stringify(event, null, 2));
@@ -28,10 +27,8 @@ export const handler = async (event: NotifyUserInput): Promise<any> => {
   try {
     const { leaveRequest, recipientEmail, emailType } = event;
 
-   
     const emailContent = generateEmailContent(emailType, leaveRequest);
 
-   
     const command = new SendEmailCommand({
       Source: SENDER_EMAIL,
       Destination: {
@@ -68,10 +65,15 @@ export const handler = async (event: NotifyUserInput): Promise<any> => {
     };
   } catch (error: any) {
     console.error('Error sending email:', error);
+    
+   
+    if (error.name === 'MessageRejected') {
+      console.error('Email address not verified in SES. Please verify:', error.message);
+    }
+    
     throw error;
   }
 };
-
 
 function generateEmailContent(
   emailType: string,
@@ -100,6 +102,14 @@ function generateEmailContent(
               
               <p>Please review and approve/reject this request in the Leave Management System.</p>
               
+              <div style="margin: 30px 0;">
+                <p><strong>To approve or reject, use the following API endpoint:</strong></p>
+                <p style="background-color: #f8f9fa; padding: 10px; border-left: 4px solid #007bff; font-family: monospace; font-size: 12px;">
+                  POST ${API_ENDPOINT}/leave/approve<br/>
+                  Body: {"leaveId": "${leaveId}", "action": "approve" or "reject"}
+                </p>
+              </div>
+              
               <p style="margin-top: 30px; font-size: 12px; color: #888;">
                 This is an automated email. Please do not reply.
               </p>
@@ -121,6 +131,10 @@ Leave Details:
 - Reason: ${reason}
 
 Please review and approve/reject this request in the Leave Management System.
+
+To approve or reject, use the following API endpoint:
+POST ${API_ENDPOINT}/leave/approve
+Body: {"leaveId": "${leaveId}", "action": "approve" or "reject"}
 
 This is an automated email. Please do not reply.
         `,

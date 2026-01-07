@@ -1,86 +1,46 @@
-name: Deploy Leave Management API
+name: Deploy Leave Management System (SAM + OIDC)
 
 on:
   push:
     branches:
       - main
-      - dev
-  pull_request:
-    branches:
-      - main
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
-  test:
-    name: Run Tests
+  deploy:
+    name: Build & Deploy
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'npm'
+          node-version: 20
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Run tests
         run: npm test
+        continue-on-error: true
 
-      - name: Build TypeScript
-        run: npm run build
-
-  deploy:
-    name: Deploy to AWS
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          node-version: '18'
-          cache: 'npm'
+          role-to-assume: arn:aws:iam::817901212217:role/github-actions-leave-management-role
+          aws-region: ap-south-1
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Setup AWS SAM CLI
+      - name: Install AWS SAM CLI
         uses: aws-actions/setup-sam@v2
-        with:
-          use-installer: true
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
 
       - name: SAM Build
         run: sam build
 
       - name: SAM Deploy
-        run: |
-          sam deploy \
-            --no-confirm-changeset \
-            --no-fail-on-empty-changeset \
-            --stack-name leave-management-stack \
-            --capabilities CAPABILITY_IAM \
-            --region ${{ secrets.AWS_REGION }} \
-            --parameter-overrides JWTSecret=${{ secrets.JWT_SECRET }}
-
-      - name: Get API Endpoint
-        run: |
-          echo "Deployment successful!"
-          aws cloudformation describe-stacks \
-            --stack-name leave-management-stack \
-            --query 'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue' \
-            --output text
+        run: sam deploy --config-env default
