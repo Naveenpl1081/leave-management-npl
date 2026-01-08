@@ -24,10 +24,25 @@ jobs:
       - name: Setup AWS SAM
         uses: aws-actions/setup-sam@v2
 
-      - name: Install esbuild and Root Dependencies
+      - name: Install Dependencies and esbuild
         run: |
+          # 1. Install esbuild globally so SAM can find it
           npm install -g esbuild
-         
+          
+          # 2. Go to your Lambda folder and install dependencies there
+          # This is critical because esbuild needs to find 'jsonwebtoken'
+          cd src/lambdas/auth
+          
+          # If package.json doesn't exist, we create a basic one and install libraries
+          if [ ! -f package.json ]; then
+            npm init -y
+            npm install jsonwebtoken @aws-sdk/client-ssm
+          else
+            npm install
+          fi
+          
+          # Go back to root for the SAM build
+          cd ../../../
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -36,7 +51,6 @@ jobs:
           aws-region: ap-south-1
 
       - name: SAM Build
-     
         run: sam build
 
       - name: SAM Deploy
