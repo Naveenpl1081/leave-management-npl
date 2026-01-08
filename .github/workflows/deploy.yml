@@ -3,15 +3,16 @@ name: Deploy Leave Management SAM
 on:
   push:
     branches:
-      - main  
+      - main
 
 permissions:
-  id-token: write 
-  contents: read 
+  id-token: write
+  contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -24,25 +25,13 @@ jobs:
       - name: Setup AWS SAM
         uses: aws-actions/setup-sam@v2
 
-      - name: Install Dependencies and esbuild
+      - name: Install Dependencies
         run: |
-          # 1. Install esbuild globally so SAM can find it
+          # Install root dependencies (includes jsonwebtoken and all AWS SDK packages)
+          npm install
+          
+          # Install esbuild globally for SAM
           npm install -g esbuild
-          
-          # 2. Go to your Lambda folder and install dependencies there
-          # This is critical because esbuild needs to find 'jsonwebtoken'
-          cd src/lambdas/auth
-          
-          # If package.json doesn't exist, we create a basic one and install libraries
-          if [ ! -f package.json ]; then
-            npm init -y
-            npm install jsonwebtoken @aws-sdk/client-ssm
-          else
-            npm install
-          fi
-          
-          # Go back to root for the SAM build
-          cd ../../../
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4

@@ -86,6 +86,8 @@ Resources:
         Target: es2020
         EntryPoints:
           - index.ts
+        External:
+          - '@aws-sdk/*'
 
   # Save Leave to DynamoDB Lambda
   SaveLeaveFunction:
@@ -104,6 +106,8 @@ Resources:
         Target: es2020
         EntryPoints:
           - index.ts
+        External:
+          - '@aws-sdk/*'
 
   # Notify User Lambda
   NotifyUserFunction:
@@ -126,6 +130,8 @@ Resources:
         Target: es2020
         EntryPoints:
           - index.ts
+        External:
+          - '@aws-sdk/*'
 
   # Wait For Approval Lambda
   WaitForApprovalFunction:
@@ -144,6 +150,8 @@ Resources:
         Target: es2020
         EntryPoints:
           - index.ts
+        External:
+          - '@aws-sdk/*'
 
   # Approve Leave Lambda
   ApproveLeaveFunction:
@@ -168,6 +176,8 @@ Resources:
         Target: es2020
         EntryPoints:
           - index.ts
+        External:
+          - '@aws-sdk/*'
 
   # ==================== Step Functions State Machine ====================
   LeaveStateMachine:
