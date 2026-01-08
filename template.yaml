@@ -36,11 +36,8 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: expiresAt
         Enabled: true
-      Tags:
-        - Key: Project
-          Value: LeaveManagement
 
-  # ==================== IAM Role for API Gateway to invoke Step Functions ====================
+  # ==================== IAM Role for API Gateway ====================
   ApiGatewayStepFunctionsRole:
     Type: AWS::IAM::Role
     Properties:
@@ -63,7 +60,6 @@ Resources:
 
   # ==================== Lambda Functions ====================
   
-  # Auth Lambda
   AuthFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -78,7 +74,7 @@ Resources:
           - Effect: Allow
             Action:
               - ssm:GetParameter
-            Resource: !Sub arn:aws:ssm:${AWS::Region}:*:parameter/leave-management/jwt-secret      
+            Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/leave-management/jwt-secret      
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
@@ -86,8 +82,8 @@ Resources:
         Target: es2020
         EntryPoints:
           - index.ts
+        ProjectRoot: ../../../ # Tells esbuild to find package.json in the root
 
-  # Save Leave to DynamoDB Lambda
   SaveLeaveFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -104,8 +100,8 @@ Resources:
         Target: es2020
         EntryPoints:
           - index.ts
+        ProjectRoot: ../../../ #
 
-  # Notify User Lambda
   NotifyUserFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -126,8 +122,8 @@ Resources:
         Target: es2020
         EntryPoints:
           - index.ts
+        ProjectRoot: ../../../ #
 
-  # Wait For Approval Lambda
   WaitForApprovalFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -144,8 +140,8 @@ Resources:
         Target: es2020
         EntryPoints:
           - index.ts
+        ProjectRoot: ../../../ #
 
-  # Approve Leave Lambda
   ApproveLeaveFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -168,18 +164,15 @@ Resources:
         Target: es2020
         EntryPoints:
           - index.ts
+        ProjectRoot: ../../../ #
 
-  # ==================== Step Functions State Machine ====================
+  # ==================== Step Functions ====================
   LeaveStateMachine:
     Type: AWS::Serverless::StateMachine
-    DependsOn:
-      - SaveLeaveFunction
-      - NotifyUserFunction
-      - WaitForApprovalFunction
     Properties:
       Name: leave-approval-workflow
       DefinitionUri: src/stepfunctions/leaveWorkflow.asl.json
-      DefinitionSubstitutions:
+      DefinitionSubstitutions: # Maps placeholders in ASL to real function ARNs
         SaveLeaveFunctionArn: !GetAtt SaveLeaveFunction.Arn
         NotifyUserFunctionArn: !GetAtt NotifyUserFunction.Arn
         WaitForApprovalFunctionArn: !GetAtt WaitForApprovalFunction.Arn
@@ -195,11 +188,6 @@ Resources:
   # ==================== API Gateway ====================
   LeaveAPI:
     Type: AWS::Serverless::Api
-    DependsOn:
-      - AuthFunction
-      - ApproveLeaveFunction
-      - LeaveStateMachine
-      - ApiGatewayStepFunctionsRole
     Properties:
       Name: leave-management-api
       StageName: dev
@@ -223,31 +211,15 @@ Resources:
                 requestTemplates:
                   application/json: !Sub |
                     #set($inputRoot = $input.path('$'))
-                    #set($context = $context)
-                    #set($userId = $context.authorizer.userId)
-                    #set($userName = $context.authorizer.name)
-                    #set($userEmail = $context.authorizer.email)
                     {
                       "stateMachineArn": "${LeaveStateMachine.Arn}",
-                      "input": "{\"leaveRequest\": {\"leaveId\": \"LEAVE-$context.requestId\", \"userId\": \"$userId\", \"userName\": \"$userName\", \"userEmail\": \"$userEmail\", \"startDate\": \"$inputRoot.startDate\", \"endDate\": \"$inputRoot.endDate\", \"reason\": \"$inputRoot.reason\", \"status\": \"PENDING\", \"approverEmail\": \"$inputRoot.approverEmail\", \"createdAt\": \"$context.requestTimeEpoch\"}, \"approverEmail\": \"$inputRoot.approverEmail\"}"
+                      "input": "{\"leaveRequest\": $input.json('$'), \"approverEmail\": \"$inputRoot.approverEmail\"}"
                     }
                 responses:
                   '200':
                     statusCode: 200
-                    responseTemplates:
-                      application/json: |
-                        #set($inputRoot = $input.path('$'))
-                        {
-                          "success": true,
-                          "message": "Leave request submitted successfully",
-                          "executionArn": "$inputRoot.executionArn",
-                          "startDate": "$inputRoot.startDate"
-                        }
               security:
                 - LambdaAuthorizer: []
-              responses:
-                '200':
-                  description: Success
           /leave/approve:
             post:
               x-amazon-apigateway-integration:
@@ -256,9 +228,6 @@ Resources:
                 type: aws_proxy
               security:
                 - LambdaAuthorizer: []
-              responses:
-                '200':
-                  description: Success
         securityDefinitions:
           LambdaAuthorizer:
             type: apiKey
@@ -270,10 +239,9 @@ Resources:
               authorizerUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthFunction.Arn}/invocations
               authorizerResultTtlInSeconds: 300
 
-  # ==================== Lambda Permissions ====================
+  # ==================== Permissions ====================
   AuthFunctionApiPermission:
     Type: AWS::Lambda::Permission
-    DependsOn: LeaveAPI
     Properties:
       FunctionName: !Ref AuthFunction
       Action: lambda:InvokeFunction
@@ -282,7 +250,6 @@ Resources:
 
   ApproveLeaveFunctionApiPermission:
     Type: AWS::Lambda::Permission
-    DependsOn: LeaveAPI
     Properties:
       FunctionName: !Ref ApproveLeaveFunction
       Action: lambda:InvokeFunction
@@ -291,21 +258,4 @@ Resources:
 
 Outputs:
   ApiEndpoint:
-    Description: API Gateway endpoint URL
     Value: !Sub https://${LeaveAPI}.execute-api.${AWS::Region}.amazonaws.com/dev
-
-  ApplyLeaveEndpoint:
-    Description: Apply Leave API Endpoint
-    Value: !Sub https://${LeaveAPI}.execute-api.${AWS::Region}.amazonaws.com/dev/leave/apply
-
-  ApproveLeaveEndpoint:
-    Description: Approve Leave API Endpoint
-    Value: !Sub https://${LeaveAPI}.execute-api.${AWS::Region}.amazonaws.com/dev/leave/approve
-
-  LeaveTableName:
-    Description: DynamoDB Table Name
-    Value: !Ref LeaveTable
-
-  StateMachineArn:
-    Description: Step Functions State Machine ARN
-    Value: !Ref LeaveStateMachine
