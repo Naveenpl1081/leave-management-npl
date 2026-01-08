@@ -6,7 +6,7 @@ const docClient = DynamoDBDocumentClient.from(dynamoClient);
 
 const TABLE_NAME = process.env.TABLE_NAME!;
 
-interface WaitForApprovalEvent {
+interface SaveLeaveEvent {
   leaveRequest: {
     leaveId: string;
     userId: string;
@@ -17,42 +17,41 @@ interface WaitForApprovalEvent {
     reason: string;
     status: string;
     approverEmail: string;
+    createdAt: string;
   };
-  taskToken: string;
 }
 
-export const handler = async (event: WaitForApprovalEvent): Promise<any> => {
-  console.log('WaitForApproval Lambda triggered');
+export const handler = async (event: SaveLeaveEvent): Promise<any> => {
+  console.log('Save Leave Lambda triggered');
   console.log('Event:', JSON.stringify(event, null, 2));
 
   try {
-    const { leaveRequest, taskToken } = event;
+    const { leaveRequest } = event;
+
+    const item = {
+      PK: leaveRequest.leaveId,
+      SK: leaveRequest.userId,
+      ...leaveRequest,
+    };
 
     await docClient.send(
       new PutCommand({
         TableName: TABLE_NAME,
-        Item: {
-          PK: `TOKEN#${leaveRequest.leaveId}`,
-          SK: 'TASKTOKEN',
-          taskToken: taskToken,
-          leaveId: leaveRequest.leaveId,
-          createdAt: new Date().toISOString(),
-          expiresAt: Math.floor(Date.now() / 1000) + 86400,
-        },
+        Item: item,
       })
     );
 
-    console.log(`Task token stored for leave ${leaveRequest.leaveId}`);
+    console.log('Leave request saved to DynamoDB:', leaveRequest.leaveId);
 
     return {
       statusCode: 200,
       body: {
-        message: 'Task token stored successfully',
+        message: 'Leave request saved successfully',
         leaveId: leaveRequest.leaveId,
       },
     };
   } catch (error: any) {
-    console.error('Error storing task token:', error);
+    console.error('Error saving leave:', error);
     throw error;
   }
 };

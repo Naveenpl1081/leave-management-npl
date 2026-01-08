@@ -9,7 +9,6 @@ import {
 import {
   SFNClient,
   SendTaskSuccessCommand,
-  SendTaskFailureCommand,
 } from "@aws-sdk/client-sfn";
 import { LeaveStatus } from "../../shared/types";
 import {
@@ -138,35 +137,19 @@ export const handler = async (
 
     console.log(`Leave request ${leaveId} ${newStatus}`);
 
-    
     try {
-      if (action === "approve") {
-        await sfnClient.send(
-          new SendTaskSuccessCommand({
-            taskToken: taskToken,
-            output: JSON.stringify({
-              status: newStatus,
-              leaveId: leaveId,
-              approverId: approverId,
-              updatedAt: updatedAt,
-            }),
-          })
-        );
-        console.log("Step Functions task success sent");
-      } else {
-        await sfnClient.send(
-          new SendTaskSuccessCommand({
-            taskToken: taskToken,
-            output: JSON.stringify({
-              status: newStatus,
-              leaveId: leaveId,
-              approverId: approverId,
-              updatedAt: updatedAt,
-            }),
-          })
-        );
-        console.log("Step Functions task success sent (rejection)");
-      }
+      await sfnClient.send(
+        new SendTaskSuccessCommand({
+          taskToken: taskToken,
+          output: JSON.stringify({
+            status: newStatus,
+            leaveId: leaveId,
+            approverId: approverId,
+            updatedAt: updatedAt,
+          }),
+        })
+      );
+      console.log("Step Functions task success sent");
     } catch (sfnError: any) {
       console.error("Error sending task success to Step Functions:", sfnError);
     }

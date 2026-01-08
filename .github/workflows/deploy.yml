@@ -1,48 +1,42 @@
-name: Deploy Leave Management System (SAM + OIDC)
+name: Deploy Leave Management SAM
 
 on:
   push:
     branches:
-      - main
+      - main  # This starts the deploy when you push to your main branch
 
 permissions:
-  id-token: write
-  contents: read
+  id-token: write # Mandatory for OIDC
+  contents: read  # Mandatory to checkout your code
 
 jobs:
   deploy:
-    name: Build & Deploy
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: 20
+          python-version: '3.9'
 
-      - name: Install dependencies
-        run: npm install
+      - name: Setup AWS SAM
+        uses: aws-actions/setup-sam@v2
 
-      - name: Run tests
-        run: npm test
-        continue-on-error: true
-
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::817901212217:role/github-actions-leave-management-role
+          role-to-assume: arn:aws:iam::817901212217:role/GitHubActionSAMRole
           aws-region: ap-south-1
-
-      - name: Install AWS SAM CLI
-        uses: aws-actions/setup-sam@v2
 
       - name: SAM Build
         run: sam build
 
       - name: SAM Deploy
-        run: sam deploy --config-env default
+        run: |
+          sam deploy --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --stack-name leave-management-stack \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --region ap-south-1

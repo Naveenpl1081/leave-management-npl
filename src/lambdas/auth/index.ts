@@ -23,14 +23,14 @@ const getJwtSecret = async (): Promise<string> => {
       WithDecryption: true,
     })
   );
-  console.log("response",response)
+  console.log("response", response);
 
   if (!response.Parameter?.Value) {
     throw new Error("JWT secret not found in SSM");
   }
 
   cachedSecret = response.Parameter.Value;
-  console.log("cached",cachedSecret)
+  console.log("cached", cachedSecret);
   return cachedSecret;
 };
 
@@ -70,8 +70,8 @@ const generatePolicy = (
     ],
   },
   context: {
-    userId: String(user.userId),        
-    email: String(user.email),         
+    userId: String(user.userId),
+    email: String(user.email),
     role: String(user.role),
     name: String(user.name),
   },
