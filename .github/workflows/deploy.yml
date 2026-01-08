@@ -27,7 +27,7 @@ jobs:
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::817901212217:role/GitHubActionSAMRole
+          role-to-assume: arn:aws:iam::817901212217:role/github-actions-leave-management-npl-role
           aws-region: ap-south-1
 
       - name: SAM Build
