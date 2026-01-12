@@ -1,9 +1,37 @@
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { randomBytes } from 'crypto';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 
 const sesClient = new SESClient({});
+const dynamoClient = new DynamoDBClient({});
+const docClient = DynamoDBDocumentClient.from(dynamoClient);
+const ssmClient = new SSMClient({});
 
-const SENDER_EMAIL = process.env.SENDER_EMAIL 
-const API_ENDPOINT = process.env.API_ENDPOINT 
+const SENDER_EMAIL = process.env.SENDER_EMAIL;
+const API_ENDPOINT_PARAM = process.env.API_ENDPOINT_PARAM;
+const TABLE_NAME = process.env.TABLE_NAME!;
+
+let cachedApiEndpoint: string | null = null;
+
+// Get API endpoint from SSM Parameter Store
+const getApiEndpoint = async (): Promise<string> => {
+  if (cachedApiEndpoint) return cachedApiEndpoint;
+
+  const response = await ssmClient.send(
+    new GetParameterCommand({
+      Name: API_ENDPOINT_PARAM!,
+    })
+  );
+
+  if (!response.Parameter?.Value) {
+    throw new Error('API endpoint not found in SSM');
+  }
+
+  cachedApiEndpoint = response.Parameter.Value;
+  return cachedApiEndpoint;
+};
 
 interface NotifyUserInput {
   leaveRequest: {
@@ -20,6 +48,44 @@ interface NotifyUserInput {
   emailType: 'approval_request' | 'approved' | 'rejected';
 }
 
+// Generate a secure one-time approval token
+const generateApprovalToken = (): string => {
+  return randomBytes(32).toString('hex');
+};
+
+// Store the approval token in DynamoDB
+const storeApprovalToken = async (leaveId: string, approveToken: string, rejectToken: string) => {
+  const expiresAt = Math.floor(Date.now() / 1000) + 86400; // 24 hours
+
+  await docClient.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: {
+        PK: `APPROVAL_TOKEN#${approveToken}`,
+        SK: 'TOKEN',
+        leaveId: leaveId,
+        action: 'approve',
+        expiresAt: expiresAt,
+        used: false,
+      },
+    })
+  );
+
+  await docClient.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: {
+        PK: `APPROVAL_TOKEN#${rejectToken}`,
+        SK: 'TOKEN',
+        leaveId: leaveId,
+        action: 'reject',
+        expiresAt: expiresAt,
+        used: false,
+      },
+    })
+  );
+};
+
 export const handler = async (event: NotifyUserInput): Promise<any> => {
   console.log('Notify User Lambda triggered');
   console.log('Event:', JSON.stringify(event, null, 2));
@@ -27,7 +93,19 @@ export const handler = async (event: NotifyUserInput): Promise<any> => {
   try {
     const { leaveRequest, recipientEmail, emailType } = event;
 
-    const emailContent = generateEmailContent(emailType, leaveRequest);
+    let approveToken = '';
+    let rejectToken = '';
+    let apiEndpoint = '';
+
+    // Generate tokens and get API endpoint only for approval request emails
+    if (emailType === 'approval_request') {
+      approveToken = generateApprovalToken();
+      rejectToken = generateApprovalToken();
+      await storeApprovalToken(leaveRequest.leaveId, approveToken, rejectToken);
+      apiEndpoint = await getApiEndpoint();
+    }
+
+    const emailContent = generateEmailContent(emailType, leaveRequest, approveToken, rejectToken, apiEndpoint);
 
     const command = new SendEmailCommand({
       Source: SENDER_EMAIL,
@@ -66,7 +144,6 @@ export const handler = async (event: NotifyUserInput): Promise<any> => {
   } catch (error: any) {
     console.error('Error sending email:', error);
     
-   
     if (error.name === 'MessageRejected') {
       console.error('Email address not verified in SES. Please verify:', error.message);
     }
@@ -77,12 +154,18 @@ export const handler = async (event: NotifyUserInput): Promise<any> => {
 
 function generateEmailContent(
   emailType: string,
-  leaveRequest: any
+  leaveRequest: any,
+  approveToken: string = '',
+  rejectToken: string = '',
+  apiEndpoint: string = ''
 ): { subject: string; htmlBody: string; textBody: string } {
   const { leaveId, userName, startDate, endDate, reason, status } = leaveRequest;
 
   switch (emailType) {
     case 'approval_request':
+      const approveUrl = `${apiEndpoint}/leave/approve?token=${approveToken}`;
+      const rejectUrl = `${apiEndpoint}/leave/approve?token=${rejectToken}`;
+
       return {
         subject: `Leave Approval Request - ${userName}`,
         htmlBody: `
@@ -100,15 +183,22 @@ function generateEmailContent(
                 <p><strong>Reason:</strong> ${reason}</p>
               </div>
               
-              <p>Please review and approve/reject this request in the Leave Management System.</p>
+              <p>Please click one of the buttons below to approve or reject this request:</p>
               
-              <div style="margin: 30px 0;">
-                <p><strong>To approve or reject, use the following API endpoint:</strong></p>
-                <p style="background-color: #f8f9fa; padding: 10px; border-left: 4px solid #007bff; font-family: monospace; font-size: 12px;">
-                  POST ${API_ENDPOINT}/leave/approve<br/>
-                  Body: {"leaveId": "${leaveId}", "action": "approve" or "reject"}
-                </p>
+              <div style="margin: 30px 0; text-align: center;">
+                <a href="${approveUrl}" 
+                   style="display: inline-block; padding: 12px 30px; margin: 10px; background-color: #27ae60; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                  ✓ APPROVE
+                </a>
+                <a href="${rejectUrl}" 
+                   style="display: inline-block; padding: 12px 30px; margin: 10px; background-color: #e74c3c; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                  ✗ REJECT
+                </a>
               </div>
+              
+              <p style="font-size: 12px; color: #888; margin-top: 30px;">
+                Note: These links will expire in 24 hours and can only be used once.
+              </p>
               
               <p style="margin-top: 30px; font-size: 12px; color: #888;">
                 This is an automated email. Please do not reply.
@@ -130,11 +220,10 @@ Leave Details:
 - End Date: ${endDate}
 - Reason: ${reason}
 
-Please review and approve/reject this request in the Leave Management System.
+To approve this request, click: ${approveUrl}
+To reject this request, click: ${rejectUrl}
 
-To approve or reject, use the following API endpoint:
-POST ${API_ENDPOINT}/leave/approve
-Body: {"leaveId": "${leaveId}", "action": "approve" or "reject"}
+Note: These links will expire in 24 hours and can only be used once.
 
 This is an automated email. Please do not reply.
         `,

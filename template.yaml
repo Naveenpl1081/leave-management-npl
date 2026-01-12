@@ -116,6 +116,9 @@ Resources:
       FunctionName: leave-notify-function
       CodeUri: src/lambdas/notifyUser/
       Handler: index.handler
+      Environment:
+        Variables:
+          API_ENDPOINT_PARAM: !Sub /leave-management/${AWS::StackName}/api-endpoint
       Policies:
         - Statement:
             - Effect: Allow
@@ -123,6 +126,12 @@ Resources:
                 - ses:SendEmail
                 - ses:SendRawEmail
               Resource: '*'
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/leave-management/${AWS::StackName}/api-endpoint
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LeaveTable
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
@@ -182,10 +191,6 @@ Resources:
   # ==================== Step Functions State Machine ====================
   LeaveStateMachine:
     Type: AWS::Serverless::StateMachine
-    DependsOn:
-      - SaveLeaveFunction
-      - NotifyUserFunction
-      - WaitForApprovalFunction
     Properties:
       Name: leave-approval-workflow
       DefinitionUri: src/stepfunctions/leaveWorkflow.asl.json
@@ -205,11 +210,6 @@ Resources:
   # ==================== API Gateway ====================
   LeaveAPI:
     Type: AWS::Serverless::Api
-    DependsOn:
-      - AuthFunction
-      - ApproveLeaveFunction
-      - LeaveStateMachine
-      - ApiGatewayStepFunctionsRole
     Properties:
       Name: leave-management-api
       StageName: dev
@@ -268,6 +268,18 @@ Resources:
               responses:
                 '200':
                   description: Success
+            get:
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApproveLeaveFunction.Arn}/invocations
+                httpMethod: POST
+                type: aws_proxy
+              responses:
+                '200':
+                  description: Success
+                  content:
+                    text/html:
+                      schema:
+                        type: string
         securityDefinitions:
           LambdaAuthorizer:
             type: apiKey
@@ -282,7 +294,6 @@ Resources:
   # ==================== Lambda Permissions ====================
   AuthFunctionApiPermission:
     Type: AWS::Lambda::Permission
-    DependsOn: LeaveAPI
     Properties:
       FunctionName: !Ref AuthFunction
       Action: lambda:InvokeFunction
@@ -291,12 +302,20 @@ Resources:
 
   ApproveLeaveFunctionApiPermission:
     Type: AWS::Lambda::Permission
-    DependsOn: LeaveAPI
     Properties:
       FunctionName: !Ref ApproveLeaveFunction
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${LeaveAPI}/*/*
+
+  # ==================== SSM Parameter for API Endpoint ====================
+  ApiEndpointParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /leave-management/${AWS::StackName}/api-endpoint
+      Description: API Gateway endpoint URL for Leave Management System
+      Type: String
+      Value: !Sub https://${LeaveAPI}.execute-api.${AWS::Region}.amazonaws.com/dev
 
 Outputs:
   ApiEndpoint:

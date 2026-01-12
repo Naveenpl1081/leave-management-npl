@@ -27,10 +27,9 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          # Install root dependencies (includes jsonwebtoken and all AWS SDK packages)
+          
           npm install
           
-          # Install esbuild globally for SAM
           npm install -g esbuild
 
       - name: Configure AWS Credentials (OIDC)
