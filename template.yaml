@@ -250,8 +250,7 @@ Resources:
                         {
                           "success": true,
                           "message": "Leave request submitted successfully",
-                          "executionArn": "$inputRoot.executionArn",
-                          "startDate": "$inputRoot.startDate"
+                          "leaveId": "LEAVE-$context.requestId"
                         }
               security:
                 - LambdaAuthorizer: []
